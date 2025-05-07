@@ -18,84 +18,77 @@ def open_browser():
     """Abre el navegador automáticamente cuando la aplicación inicia"""
     webbrowser.open_new('http://127.0.0.1:5000/')
 
-def scrape_mercado_libre(search_query, exact_match=False):
+def scrape_mercado_libre(search_query, exact_match=False, max_pages=5):
     """
-    Realiza el scraping de productos en Mercado Libre
+    Realiza scraping de productos en Mercado Libre con paginación.
     
     Args:
         search_query (str): Término de búsqueda
         exact_match (bool): Si es True, busca coincidencias exactas
+        max_pages (int): Número máximo de páginas a recorrer
         
     Returns:
         list: Lista de productos encontrados
     """
-    # Formatea la consulta para la URL
     formatted_query = search_query.replace(' ', '-')
-    
-    # URL base para la búsqueda
-    base_url = f"https://listado.mercadolibre.com.ar/{formatted_query}"
-    
-    # Cabeceras para simular un navegador real
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0',
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
     }
-    
-    products = []
-    
-    try:
-        # Realizar la petición HTTP
-        response = requests.get(base_url, headers=headers)
-        response.raise_for_status()  # Verificar si la petición fue exitosa
-        
-        # Parsear el HTML
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Encontrar todos los items de productos
-        items = soup.find_all('div', class_='ui-search-result__wrapper')
-        
-        for item in items:
-            try:
-                # Extraer los datos del producto
-                title_element = item.find('h2', class_='ui-search-item__title')
-                price_element = item.find('span', class_='andes-money-amount__fraction')
-                seller_element = item.find('span', class_='ui-search-official-store-label')
-                link_element = item.find('a', class_='ui-search-item__group__element')
-                
-                if title_element and price_element:
-                    title = title_element.text.strip()
-                    
-                    # Si se requiere coincidencia exacta, verificar si el título coincide
-                    if exact_match:
-                        similarity = difflib.SequenceMatcher(None, search_query.lower(), title.lower()).ratio()
-                        # Solo incluir productos con alta similitud (ajustar el umbral según sea necesario)
-                        if similarity < 0.7:
-                            continue
-                    
-                    price_text = price_element.text.strip().replace('.', '')
-                    price = int(price_text) if price_text.isdigit() else 0
-                    
-                    seller = seller_element.text.strip() if seller_element else "Vendedor particular"
-                    link = link_element['href'] if link_element else ""
-                    
-                    products.append({
-                        'title': title,
-                        'price': price,
-                        'seller': seller,
-                        'link': link
-                    })
-            except Exception as e:
-                print(f"Error al procesar un item: {e}")
-                continue
-                
-        # Agregar algo de espera para evitar bloqueos
-        time.sleep(1)
-        
-    except Exception as e:
-        print(f"Error en el scraping: {e}")
-    
-    return products
 
+    products = []
+    page_number = 0
+
+    for page in range(max_pages):
+        offset = page_number * 50
+        url = f"https://listado.mercadolibre.com.ar/{formatted_query}_Desde_{offset + 1}_NoIndex_True"
+
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            items = soup.find_all('div', class_='ui-search-result__wrapper')
+
+            if not items:
+                break
+
+            for item in items:
+                try:
+                    title_element = item.find('h2', class_='ui-search-item__title')
+                    price_element = item.find('span', class_='andes-money-amount__fraction')
+                    seller_element = item.find('span', class_='ui-search-official-store-label')
+                    link_element = item.find('a', class_='ui-search-item__group__element')
+
+                    if title_element and price_element:
+                        title = title_element.text.strip()
+                        if exact_match:
+                            similarity = difflib.SequenceMatcher(None, search_query.lower(), title.lower()).ratio()
+                            if similarity < 0.7:
+                                continue
+
+                        price_text = price_element.text.strip().replace('.', '')
+                        price = int(price_text) if price_text.isdigit() else 0
+                        seller = seller_element.text.strip() if seller_element else "Vendedor particular"
+                        link = link_element['href'] if link_element else ""
+
+                        products.append({
+                            'title': title,
+                            'price': price,
+                            'seller': seller,
+                            'link': link
+                        })
+                except Exception as e:
+                    print(f"Error al procesar un item: {e}")
+                    continue
+
+            page_number += 1
+            time.sleep(1)
+        except Exception as e:
+            print(f"Error en el scraping: {e}")
+            break
+
+    return products
+    
 def analyze_products(products):
     """
     Analiza los productos para encontrar el más caro, el más barato y el promedio
