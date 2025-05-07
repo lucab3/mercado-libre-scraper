@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mercado Libre Scraper</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding-top: 2rem;
+        }
+        .header {
+            background-color: #fff159;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            color: #333;
+            margin: 0;
+        }
+        .search-container {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .footer {
+            margin-top: 2rem;
+            padding: 1rem;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header text-center">
+            <h1>Mercado Libre Scraper</h1>
+        </div>
+
+        <div class="search-container">
+            {% if error %}
+            <div class="alert alert-danger" role="alert">
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form action="/search" method="post">
+                <div class="mb-3">
+                    <label for="search_query" class="form-label">¿Qué producto estás buscando?</label>
+                    <input type="text" class="form-control" id="search_query" name="search_query" placeholder="Ej: iPhone 13 64GB" 
+                           value="{{ search_query if search_query else '' }}" required>
+                </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="exact_match" name="exact_match">
+                    <label class="form-check-label" for="exact_match">Buscar coincidencia exacta</label>
+                </div>
+                <button type="submit" class="btn btn-primary">Buscar</button>
+            </form>
+
+            <div class="mt-4">
+                <h4>Instrucciones:</h4>
+                <ol>
+                    <li>Ingresa el nombre del producto que deseas buscar en Mercado Libre.</li>
+                    <li>Marca la opción "Buscar coincidencia exacta" si deseas resultados más precisos.</li>
+                    <li>Haz clic en "Buscar" para iniciar la búsqueda.</li>
+                    <li>En la página de resultados, podrás ver todos los productos encontrados, el más caro, el más barato y el precio promedio sugerido.</li>
+                    <li>También podrás exportar los resultados a un archivo CSV o Excel.</li>
+                </ol>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Desarrollado con ❤️ - Web Scraper para Mercado Libre</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
