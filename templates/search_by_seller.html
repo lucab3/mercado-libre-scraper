@@ -1,0 +1,77 @@
+{% extends "layout.html" %}
+
+{% block title %}Búsqueda por Vendedor - MercadoLibre Scraper{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h2 class="mb-0">Búsqueda por Vendedor</h2>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    {{ error }}
+                </div>
+                {% endif %}
+                
+                <form action="/search_by_seller" method="post">
+                    <div class="mb-3">
+                        <label for="seller_name" class="form-label">Nombre del vendedor o ID</label>
+                        <input type="text" class="form-control" id="seller_name" name="seller_name" 
+                               placeholder="Ejemplo: TIENDAHPSELLER o 123456789" value="{{ seller_name if seller_name else '' }}" required>
+                        <div class="form-text">Ingresa el nombre o ID del vendedor en MercadoLibre</div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="min_price" class="form-label">Precio mínimo</label>
+                                <input type="number" class="form-control" id="min_price" name="min_price" 
+                                       min="0" step="100" placeholder="0">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="min_sales" class="form-label">Ventas mínimas</label>
+                                <input type="number" class="form-control" id="min_sales" name="min_sales" 
+                                       min="0" step="1" placeholder="0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-success">Buscar productos del vendedor</button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer">
+                <p class="mb-0 text-muted">Esta herramienta realiza scraping de hasta 10 páginas de resultados para un vendedor específico.</p>
+            </div>
+        </div>
+        
+        <div class="card mt-4">
+            <div class="card-header bg-info text-white">
+                <h4 class="mb-0">¿Cómo encontrar vendedores?</h4>
+            </div>
+            <div class="card-body">
+                <p>Para encontrar el ID o nombre de un vendedor en MercadoLibre, puedes seguir estos pasos:</p>
+                <ol>
+                    <li>Visita la página de cualquier producto del vendedor</li>
+                    <li>Haz clic en el nombre del vendedor, que suele aparecer debajo del título del producto</li>
+                    <li>La URL de la página del vendedor contiene su ID (ejemplo: <code>https://tienda.mercadolibre.com.ar/NOMBREVENDEDOR</code>)</li>
+                    <li>Copia el nombre que aparece después de la última barra diagonal</li>
+                </ol>
+                <p>Al buscar por vendedor, podrás ver todos sus productos publicados y obtener información valiosa sobre:</p>
+                <ul>
+                    <li>Rango de precios de sus productos</li>
+                    <li>Productos más vendidos</li>
+                    <li>Categorías principales</li>
+                    <li>Estadísticas generales de la tienda</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

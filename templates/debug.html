@@ -1,0 +1,255 @@
+{% extends "layout.html" %}
+
+{% block title %}Información de Depuración - MercadoLibre Scraper{% endblock %}
+
+{% block additional_styles %}
+<style>
+    .json-viewer {
+        background-color: #f5f5f5;
+        border-radius: 5px;
+        padding: 15px;
+        overflow-x: auto;
+        font-family: monospace;
+        font-size: 14px;
+    }
+    
+    .debug-card {
+        margin-bottom: 20px;
+        border-left: 5px solid #6c757d;
+    }
+    
+    .debug-card.success {
+        border-left-color: #28a745;
+    }
+    
+    .debug-card.failure {
+        border-left-color: #dc3545;
+    }
+    
+    .debug-card.skipped {
+        border-left-color: #ffc107;
+    }
+    
+    .debug-header {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 15px;
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        cursor: pointer;
+    }
+    
+    .debug-body {
+        padding: 15px;
+        display: none;
+    }
+    
+    .debug-body.show {
+        display: block;
+    }
+    
+    .badge-success {
+        background-color: #28a745;
+        color: white;
+    }
+    
+    .badge-danger {
+        background-color: #dc3545;
+        color: white;
+    }
+    
+    .badge-warning {
+        background-color: #ffc107;
+        color: #212529;
+    }
+    
+    .error-message {
+        color: #dc3545;
+        background-color: #f8d7da;
+        padding: 5px 10px;
+        border-radius: 3px;
+        margin-top: 5px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <h2>Información de Depuración</h2>
+        <p>Esta página muestra información detallada sobre la última operación de scraping realizada.</p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <h4 class="mb-0">Resumen</h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 text-center">
+                        <h5>Total de elementos procesados</h5>
+                        <h2>{{ debug_data|length }}</h2>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <h5>Exitosos</h5>
+                        <h2 class="text-success">{{ debug_data|selectattr('success', 'eq', true)|list|length }}</h2>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <h5>Con errores</h5>
+                        <h2 class="text-danger">{{ debug_data|selectattr('success', 'ne', true)|list|length }}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between mb-3">
+            <h3>Detalles de procesamiento</h3>
+            <div>
+                <button class="btn btn-outline-primary" id="expandAll">Expandir todo</button>
+                <button class="btn btn-outline-secondary" id="collapseAll">Colapsar todo</button>
+            </div>
+        </div>
+        
+        {% for item in debug_data %}
+        <div class="card debug-card {% if item.success %}success{% elif item.skipped %}skipped{% else %}failure{% endif %}">
+            <div class="debug-header" data-bs-toggle="collapse" data-bs-target="#debug-{{ item.index }}">
+                <div>
+                    <strong>Elemento #{{ item.index + 1 }}</strong>
+                    {% if item.title %}- {{ item.title }}{% endif %}
+                </div>
+                <div>
+                    {% if item.success %}
+                    <span class="badge badge-success">Éxito</span>
+                    {% elif item.skipped %}
+                    <span class="badge badge-warning">Omitido: {{ item.skipped }}</span>
+                    {% else %}
+                    <span class="badge badge-danger">Error</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div id="debug-{{ item.index }}" class="debug-body">
+                <div class="row">
+                    {% if item.title %}
+                    <div class="col-md-12 mb-3">
+                        <h5>Título</h5>
+                        <p>{{ item.title }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.price %}
+                    <div class="col-md-4 mb-3">
+                        <h5>Precio</h5>
+                        <p>${{ item.price }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.seller %}
+                    <div class="col-md-4 mb-3">
+                        <h5>Vendedor</h5>
+                        <p>{{ item.seller }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.sales is defined %}
+                    <div class="col-md-4 mb-3">
+                        <h5>Ventas</h5>
+                        <p>{{ item.sales }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.link %}
+                    <div class="col-md-12 mb-3">
+                        <h5>Enlace</h5>
+                        <a href="{{ item.link }}" target="_blank">{{ item.link }}</a>
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.image %}
+                    <div class="col-md-12 mb-3">
+                        <h5>Imagen</h5>
+                        <img src="{{ item.image }}" alt="Imagen del producto" style="max-width: 200px; max-height: 200px;">
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.errors and item.errors|length > 0 %}
+                    <div class="col-md-12 mb-3">
+                        <h5>Errores</h5>
+                        {% for error in item.errors %}
+                        <div class="error-message mb-2">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if item.skipped %}
+                    <div class="col-md-12 mb-3">
+                        <h5>Razón de omisión</h5>
+                        <div class="alert alert-warning">{{ item.skipped }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="row mt-3">
+                    <div class="col-md-12">
+                        <button class="btn btn-sm btn-outline-secondary toggle-json">Ver JSON completo</button>
+                        <div class="json-viewer mt-2" style="display:none;">
+                            <pre>{{ item|tojson(indent=2) }}</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Toggle para mostrar/ocultar detalles
+        const headers = document.querySelectorAll('.debug-header');
+        headers.forEach(header => {
+            header.addEventListener('click', function() {
+                const body = this.nextElementSibling;
+                body.classList.toggle('show');
+            });
+        });
+        
+        // Toggle para mostrar/ocultar JSON completo
+        const jsonToggles = document.querySelectorAll('.toggle-json');
+        jsonToggles.forEach(toggle => {
+            toggle.addEventListener('click', function() {
+                const jsonViewer = this.nextElementSibling;
+                if (jsonViewer.style.display === 'none') {
+                    jsonViewer.style.display = 'block';
+                    this.textContent = 'Ocultar JSON';
+                } else {
+                    jsonViewer.style.display = 'none';
+                    this.textContent = 'Ver JSON completo';
+                }
+            });
+        });
+        
+        // Expandir todos los elementos
+        document.getElementById('expandAll').addEventListener('click', function() {
+            document.querySelectorAll('.debug-body').forEach(body => {
+                body.classList.add('show');
+            });
+        });
+        
+        // Colapsar todos los elementos
+        document.getElementById('collapseAll').addEventListener('click', function() {
+            document.querySelectorAll('.debug-body').forEach(body => {
+                body.classList.remove('show');
+            });
+        });
+    });
+</script>
+{% endblock %}
