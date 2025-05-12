@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mercado Libre Scraper</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+            background-color: #f8f9fa;
+        }
+        .form-container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        .logo-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+        .logo {
+            max-width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo-container">
+                <img src="https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.5/mercadolibre/logo__large_plus.png" alt="Mercado Libre Logo" class="logo">
+            </div>
+            <h1>Buscador de Productos</h1>
+        </div>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="form-container">
+                    {% if error %}
+                    <div class="alert alert-danger" role="alert">
+                        {{ error }}
+                    </div>
+                    {% endif %}
+                    
+                    <form action="/search" method="post">
+                        <div class="mb-3">
+                            <label for="search_query" class="form-label">Término de búsqueda</label>
+                            <input type="text" class="form-control" id="search_query" name="search_query" value="{{ search_query|default('') }}" required>
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="exact_match" name="exact_match">
+                            <label class="form-check-label" for="exact_match">Coincidencia exacta</label>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="seller_filter" class="form-label">Filtrar por vendedor (opcional)</label>
+                            <input type="text" class="form-control" id="seller_filter" name="seller_filter" value="{{ seller_filter|default('') }}">
+                            <div class="form-text">Deja en blanco para ver todos los vendedores</div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="min_price" class="form-label">Precio mínimo</label>
+                                <input type="number" class="form-control" id="min_price" name="min_price" value="{{ min_price|default('0') }}" min="0">
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label for="min_sales" class="form-label">Ventas mínimas</label>
+                                <input type="number" class="form-control" id="min_sales" name="min_sales" value="{{ min_sales|default('0') }}" min="0">
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100">Buscar</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
