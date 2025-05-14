@@ -1,392 +1,157 @@
-{% extends "layout.html" %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultados del Vendedor - {{ seller_name }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        .product-card {
+            margin-bottom: 20px;
+            height: 100%;
+        }
+        .product-image {
+            height: 200px;
+            object-fit: contain;
+        }
+        .performance-data {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .highlight {
+            background-color: #e2f3e5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="mb-4">Productos del Vendedor: {{ seller_name }}</h1>
 
-{% block title %}Productos de {{ seller_name }} - MercadoLibre Scraper{% endblock %}
-
-{% block additional_styles %}
-<style>
-    .product-title {
-        height: 50px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-    }
-    .chart-container {
-        height: 400px;
-        margin-bottom: 30px;
-    }
-    .seller-header {
-        background-color: #39b54a;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 20px;
-        color: white;
-    }
-</style>
-{% endblock %}
-
-{% block content %}
-<div class="row">
-    <div class="col-md-12 mb-4">
-        <nav aria-label="breadcrumb">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/">Inicio</a></li>
-                <li class="breadcrumb-item"><a href="/search_by_seller">Búsqueda por vendedor</a></li>
-                <li class="breadcrumb-item active" aria-current="page">{{ seller_name }}</li>
-            </ol>
-        </nav>
-        
-        <div class="seller-header">
-            <div class="d-flex justify-content-between align-items-center">
-                <h3 class="mb-0">Vendedor: {{ seller_name }}</h3>
-                <a href="/search_by_seller" class="btn btn-light">Nueva búsqueda</a>
+        <!-- Información de rendimiento -->
+        <div class="performance-data mb-4">
+            <h3>Información de la búsqueda</h3>
+            <div class="row">
+                <div class="col-md-3">
+                    <p><strong>Tiempo total:</strong> {{ performance.execution_time|round(2) }} segundos</p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Productos encontrados:</strong> {{ performance.total_products_processed }} de {{ performance.total_products_found }}</p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Páginas analizadas:</strong> {{ performance.pages_scraped }}</p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Ventas totales:</strong> {{ analysis.total_sales }}</p>
+                </div>
             </div>
-            <p class="mb-0">
-                {% if min_price > 0 %}Precio mínimo: <strong>${{ min_price }}</strong>{% endif %}
-                {% if min_sales > 0 %}| Ventas mínimas: <strong>{{ min_sales }}</strong>{% endif %}
+            <p><strong>Filtros aplicados:</strong> 
+                Precio mínimo: ${{ min_price }} | 
+                Ventas mínimas: {{ min_sales }}
             </p>
         </div>
-    </div>
-</div>
 
-<div class="row">
-    <!-- Análisis y estadísticas del vendedor -->
-    <div class="col-md-12 mb-4">
-        <div class="card summary-card">
-            <div class="card-header bg-success text-white">
-                <h4 class="mb-0">Resumen del vendedor</h4>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4 text-center">
-                        <h5>Productos encontrados</h5>
-                        <h2>{{ analysis.total_products }}</h2>
+        <!-- Resumen de análisis -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-success text-white">
+                        Producto más barato
                     </div>
-                    <div class="col-md-4 text-center">
-                        <h5>Precio promedio</h5>
-                        <h2>${{ analysis.average_price }}</h2>
-                    </div>
-                    <div class="col-md-4 text-center">
-                        <h5>Total de ventas</h5>
-                        <h2>{{ analysis.total_sales }}</h2>
+                    <div class="card-body">
+                        {% if analysis.cheapest %}
+                        <h5 class="card-title">{{ analysis.cheapest.title }}</h5>
+                        <p class="card-text">
+                            <strong>Precio:</strong> ${{ analysis.cheapest.price }}<br>
+                            <strong>Ventas:</strong> {{ analysis.cheapest.sales }}<br>
+                            <a href="{{ analysis.cheapest.link }}" target="_blank">Ver en Mercado Libre</a>
+                        </p>
+                        {% else %}
+                        <p class="card-text">No disponible</p>
+                        {% endif %}
                     </div>
                 </div>
-                
-                <hr>
-                
-                <div class="row mt-3">
-                    {% if analysis.cheapest %}
-                    <div class="col-md-6">
-                        <div class="card h-100">
-                            <div class="card-header bg-success text-white">
-                                <h5 class="mb-0">Producto más barato</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="d-flex">
-                                    <div class="me-3">
-                                        {% if analysis.cheapest.image %}
-                                        <img src="{{ analysis.cheapest.image }}" alt="{{ analysis.cheapest.title }}" style="width: 100px; height: 100px; object-fit: contain;">
-                                        {% else %}
-                                        <div style="width: 100px; height: 100px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center;">
-                                            <span>Sin imagen</span>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                    <div>
-                                        <h6>{{ analysis.cheapest.title }}</h6>
-                                        <p class="price mb-0">${{ analysis.cheapest.price }}</p>
-                                        <small class="sales-count">{{ analysis.cheapest.sales }} vendidos</small>
-                                    </div>
-                                </div>
-                                <div class="mt-2">
-                                    <a href="{{ analysis.cheapest.link }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver en MercadoLibre</a>
-                                </div>
-                            </div>
-                        </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-danger text-white">
+                        Producto más caro
                     </div>
-                    {% endif %}
-                    
-                    {% if analysis.most_expensive %}
-                    <div class="col-md-6">
-                        <div class="card h-100">
-                            <div class="card-header bg-danger text-white">
-                                <h5 class="mb-0">Producto más caro</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="d-flex">
-                                    <div class="me-3">
-                                        {% if analysis.most_expensive.image %}
-                                        <img src="{{ analysis.most_expensive.image }}" alt="{{ analysis.most_expensive.title }}" style="width: 100px; height: 100px; object-fit: contain;">
-                                        {% else %}
-                                        <div style="width: 100px; height: 100px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center;">
-                                            <span>Sin imagen</span>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                    <div>
-                                        <h6>{{ analysis.most_expensive.title }}</h6>
-                                        <p class="price mb-0">${{ analysis.most_expensive.price }}</p>
-                                        <small class="sales-count">{{ analysis.most_expensive.sales }} vendidos</small>
-                                    </div>
-                                </div>
-                                <div class="mt-2">
-                                    <a href="{{ analysis.most_expensive.link }}" target="_blank" class="btn btn-sm btn-outline-primary">Ver en MercadoLibre</a>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="card-body">
+                        {% if analysis.most_expensive %}
+                        <h5 class="card-title">{{ analysis.most_expensive.title }}</h5>
+                        <p class="card-text">
+                            <strong>Precio:</strong> ${{ analysis.most_expensive.price }}<br>
+                            <strong>Ventas:</strong> {{ analysis.most_expensive.sales }}<br>
+                            <a href="{{ analysis.most_expensive.link }}" target="_blank">Ver en Mercado Libre</a>
+                        </p>
+                        {% else %}
+                        <p class="card-text">No disponible</p>
+                        {% endif %}
                     </div>
-                    {% endif %}
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Resumen
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            <strong>Total de productos:</strong> {{ analysis.total_products }}<br>
+                            <strong>Precio promedio:</strong> ${{ analysis.average_price }}<br>
+                            <strong>Total de ventas:</strong> {{ analysis.total_sales }}
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
-    
-    <!-- Gráficas -->
-    <div class="col-md-6 mb-4">
-        <div class="card">
-            <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">Distribución de precios</h4>
-            </div>
-            <div class="card-body">
-                <div class="chart-container">
-                    <canvas id="priceChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6 mb-4">
-        <div class="card">
-            <div class="card-header bg-primary text-white">
-                <h4 class="mb-0">Distribución de ventas</h4>
-            </div>
-            <div class="card-body">
-                <div class="chart-container">
-                    <canvas id="salesChart"></canvas>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Exportar resultados -->
-    <div class="col-md-12 mb-4">
-        <div class="card">
-            <div class="card-header bg-info text-white">
-                <h4 class="mb-0">Exportar resultados</h4>
-            </div>
-            <div class="card-body">
-                <form action="/export" method="post">
-                    <input type="hidden" name="products_data" value="{{ products_json }}">
-                    <input type="hidden" name="search_query" value="{{ seller_name }}">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="export_type" id="exportCSV" value="csv" checked>
-                                <label class="form-check-label" for="exportCSV">
-                                    Exportar a CSV
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="export_type" id="exportExcel" value="excel">
-                                <label class="form-check-label" for="exportExcel">
-                                    Exportar a Excel
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-6 text-end">
-                            <button type="submit" class="btn btn-success">
-                                <i class="bi bi-download"></i> Descargar
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Listado de productos del vendedor -->
-<div class="row">
-    <div class="col-md-12 mb-4">
-        <h3>Productos del vendedor ({{ products|length }})</h3>
-    </div>
-    
-    {% for product in products %}
-    <div class="col-md-4 mb-4">
-        <div class="card h-100">
-            <div class="text-center bg-light">
-                {% if product.image %}
-                <img src="{{ product.image }}" class="product-image" alt="{{ product.title }}">
-                {% else %}
-                <div class="product-image d-flex align-items-center justify-content-center">
-                    <span class="text-muted">Sin imagen disponible</span>
-                </div>
-                {% endif %}
-            </div>
-            <div class="card-body">
-                <h5 class="card-title product-title">{{ product.title }}</h5>
-                <p class="price mb-2">${{ product.price }}</p>
-                <p class="sales-count mb-3">{{ product.sales }} vendidos</p>
-                <a href="{{ product.link }}" target="_blank" class="btn btn-primary btn-sm">Ver en MercadoLibre</a>
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Datos para los gráficos
-        const products = {{ products_json|safe }};
-        
-        // Preparar datos para el gráfico de distribución de precios
-        const priceLabels = [];
-        const priceData = [];
-        const priceColors = [];
-        
-        // Agrupar productos por rangos de precios
-        let minPrice = Math.min(...products.map(p => p.price));
-        let maxPrice = Math.max(...products.map(p => p.price));
-        let range = maxPrice - minPrice;
-        let numBins = 8;
-        let binSize = range / numBins;
-        
-        // Si hay pocos productos o rango pequeño, ajustar bins
-        if (products.length < 8 || range < 8) {
-            numBins = Math.min(5, products.length);
-            binSize = range / numBins;
-        }
-        
-        // Crear bins
-        let bins = Array(numBins).fill(0);
-        
-        // Contar productos por bin
-        products.forEach(product => {
-            let binIndex = Math.min(Math.floor((product.price - minPrice) / binSize), numBins - 1);
-            bins[binIndex]++;
-        });
-        
-        // Crear etiquetas y colores
-        for (let i = 0; i < numBins; i++) {
-            let lowerBound = Math.round(minPrice + i * binSize);
-            let upperBound = Math.round(minPrice + (i + 1) * binSize);
-            priceLabels.push(`${lowerBound} - ${upperBound}`);
-            priceData.push(bins[i]);
+        <!-- Acciones -->
+        <div class="mb-4">
+            <a href="/" class="btn btn-secondary">Nueva búsqueda</a>
             
-            // Generar color por gradiente verde
-            let lightness = 50 - (i * (20 / numBins));
-            priceColors.push(`hsla(120, 70%, ${lightness}%, 0.7)`);
-        }
-        
-        // Crear el gráfico de precios
-        const ctxPrice = document.getElementById('priceChart').getContext('2d');
-        const priceChart = new Chart(ctxPrice, {
-            type: 'bar',
-            data: {
-                labels: priceLabels,
-                datasets: [{
-                    label: 'Cantidad de productos',
-                    data: priceData,
-                    backgroundColor: priceColors,
-                    borderColor: priceColors.map(c => c.replace('0.7', '1')),
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            precision: 0
-                        }
-                    }
-                },
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Distribución de productos por rango de precios',
-                        font: {
-                            size: 16
-                        }
-                    },
-                    legend: {
-                        display: false
-                    }
-                }
-            }
-        });
-        
-        // Preparar datos para el gráfico de ventas
-        const salesLabels = [];
-        const salesData = [];
-        const salesColors = [];
-        
-        // Ordenar productos por ventas (de mayor a menor)
-        const sortedProducts = [...products].sort((a, b) => b.sales - a.sales);
-        
-        // Tomar top 10 productos con más ventas
-        const topProducts = sortedProducts.slice(0, 10);
-        
-        // Crear datos para el gráfico
-        topProducts.forEach((product, index) => {
-            // Acortar título para mostrar en gráfico
-            let shortTitle = product.title.length > 30 ? 
-                product.title.substring(0, 30) + '...' : 
-                product.title;
+            <form action="/export" method="post" class="d-inline">
+                <input type="hidden" name="products_data" value="{{ products_json }}">
+                <input type="hidden" name="search_query" value="{{ seller_name }}">
                 
-            salesLabels.push(shortTitle);
-            salesData.push(product.sales);
-            
-            // Generar color por posición
-            let hue = 200 + (index * (120 / topProducts.length));
-            salesColors.push(`hsla(${hue}, 70%, 60%, 0.7)`);
-        });
-        
-        // Crear el gráfico de ventas
-        const ctxSales = document.getElementById('salesChart').getContext('2d');
-        const salesChart = new Chart(ctxSales, {
-            type: 'bar',
-            data: {
-                labels: salesLabels,
-                datasets: [{
-                    label: 'Cantidad de ventas',
-                    data: salesData,
-                    backgroundColor: salesColors,
-                    borderColor: salesColors.map(c => c.replace('0.7', '1')),
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        ticks: {
-                            precision: 0
-                        }
-                    }
-                },
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Top productos con más ventas',
-                        font: {
-                            size: 16
-                        }
-                    },
-                    legend: {
-                        display: false
-                    }
-                }
-            }
-        });
-    });
-</script>
-{% endblock %}
+                <div class="btn-group">
+                    <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                        Exportar datos
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button type="submit" class="dropdown-item" name="export_type" value="csv">Exportar a CSV</button></li>
+                        <li><button type="submit" class="dropdown-item" name="export_type" value="excel">Exportar a Excel</button></li>
+                    </ul>
+                </div>
+            </form>
+        </div>
+
+        <!-- Lista de productos -->
+        <h2>Listado de Productos ({{ products|length }})</h2>
+        <div class="row">
+            {% for product in products %}
+            <div class="col-md-4">
+                <div class="card product-card">
+                    <div class="card-body">
+                        {% if product.image %}
+                        <img src="{{ product.image }}" class="card-img-top product-image mb-3" alt="{{ product.title }}">
+                        {% endif %}
+                        <h5 class="card-title">{{ product.title }}</h5>
+                        <p class="card-text">
+                            <strong>Precio:</strong> ${{ product.price }}<br>
+                            <strong>Vendedor:</strong> {{ product.seller }}<br>
+                            <strong>Ventas:</strong> {{ product.sales }}<br>
+                            <a href="{{ product.link }}" target="_blank">Ver en Mercado Libre</a>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
