@@ -3,145 +3,158 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Resultados - Mercado Libre Scraper</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Resultados de Búsqueda - {{ search_query }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-            background-color: #f8f9fa;
-        }
-        .header {
-            margin-bottom: 2rem;
-            text-align: center;
-        }
-        .logo-container {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 1rem;
-        }
-        .logo {
-            max-width: 200px;
-        }
-        .card {
-            height: 100%;
-            transition: transform 0.3s;
+        .product-card {
             margin-bottom: 20px;
+            height: 100%;
         }
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-        }
-        .card-img-top {
+        .product-image {
             height: 200px;
             object-fit: contain;
-            padding: 10px;
         }
-        .price {
-            font-size: 1.5rem;
-            font-weight: bold;
+        .performance-data {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
         }
-        .seller-info {
-            font-size: 0.9rem;
-            color: #555;
-        }
-        .stats-card {
-            background-color: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 30px;
-        }
-        .cheapest-product {
-            border: 2px solid #28a745;
-        }
-        .expensive-product {
-            border: 2px solid #dc3545;
-        }
-        .sales-count {
-            font-size: 0.9rem;
-            color: #28a745;
-            font-weight: bold;
+        .highlight {
+            background-color: #e2f3e5;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="logo-container">
-                <a href="/">
-                    <img src="https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.5/mercadolibre/logo__large_plus.png" alt="Mercado Libre Logo" class="logo">
-                </a>
-            </div>
-            <h1>Resultados para: "{{ search_query }}"</h1>
-            {% if seller_filter %}
-                <h5>Filtrado por vendedor: {{ seller_filter }}</h5>
-            {% endif %}
-            {% if min_price > 0 %}
-                <h5>Precio mínimo: ${{ min_price }}</h5>
-            {% endif %}
-            {% if min_sales > 0 %}
-                <h5>Ventas mínimas: {{ min_sales }}</h5>
-            {% endif %}
-        </div>
-        
-        <div class="stats-card">
+    <div class="container mt-4">
+        <h1 class="mb-4">Resultados para: "{{ search_query }}"</h1>
+
+        <!-- Información de rendimiento -->
+        <div class="performance-data mb-4">
+            <h3>Información de la búsqueda</h3>
             <div class="row">
                 <div class="col-md-3">
-                    <h5>Total de productos: {{ analysis.total_products }}</h5>
+                    <p><strong>Tiempo total:</strong> {{ performance.execution_time|round(2) }} segundos</p>
                 </div>
                 <div class="col-md-3">
-                    <h5>Precio promedio: ${{ analysis.average_price }}</h5>
+                    <p><strong>Productos encontrados:</strong> {{ performance.total_products_processed }} de {{ performance.total_products_found }}</p>
                 </div>
                 <div class="col-md-3">
-                    <h5>Más barato: ${{ analysis.cheapest.price if analysis.cheapest else '0' }}</h5>
+                    <p><strong>Páginas analizadas:</strong> {{ performance.pages_scraped }}</p>
                 </div>
                 <div class="col-md-3">
-                    <h5>Más caro: ${{ analysis.most_expensive.price if analysis.most_expensive else '0' }}</h5>
+                    <p><strong>Ventas totales:</strong> {{ analysis.total_sales }}</p>
+                </div>
+            </div>
+            <p><strong>Filtros aplicados:</strong> 
+                {% if seller_filter %}Vendedor: {{ seller_filter }} | {% endif %}
+                Precio mínimo: ${{ min_price }} | 
+                Ventas mínimas: {{ min_sales }}
+            </p>
+        </div>
+
+        <!-- Resumen de análisis -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-success text-white">
+                        Producto más barato
+                    </div>
+                    <div class="card-body">
+                        {% if analysis.cheapest %}
+                        <h5 class="card-title">{{ analysis.cheapest.title }}</h5>
+                        <p class="card-text">
+                            <strong>Precio:</strong> ${{ analysis.cheapest.price }}<br>
+                            <strong>Vendedor:</strong> {{ analysis.cheapest.seller }}<br>
+                            <strong>Ventas:</strong> {{ analysis.cheapest.sales }}<br>
+                            <a href="{{ analysis.cheapest.link }}" target="_blank">Ver en Mercado Libre</a>
+                        </p>
+                        {% else %}
+                        <p class="card-text">No disponible</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-danger text-white">
+                        Producto más caro
+                    </div>
+                    <div class="card-body">
+                        {% if analysis.most_expensive %}
+                        <h5 class="card-title">{{ analysis.most_expensive.title }}</h5>
+                        <p class="card-text">
+                            <strong>Precio:</strong> ${{ analysis.most_expensive.price }}<br>
+                            <strong>Vendedor:</strong> {{ analysis.most_expensive.seller }}<br>
+                            <strong>Ventas:</strong> {{ analysis.most_expensive.sales }}<br>
+                            <a href="{{ analysis.most_expensive.link }}" target="_blank">Ver en Mercado Libre</a>
+                        </p>
+                        {% else %}
+                        <p class="card-text">No disponible</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Resumen
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            <strong>Total de productos:</strong> {{ analysis.total_products }}<br>
+                            <strong>Precio promedio:</strong> ${{ analysis.average_price }}<br>
+                            <strong>Total de ventas:</strong> {{ analysis.total_sales }}
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
-        
+
+        <!-- Acciones -->
+        <div class="mb-4">
+            <a href="/" class="btn btn-secondary">Nueva búsqueda</a>
+            
+            <form action="/export" method="post" class="d-inline">
+                <input type="hidden" name="products_data" value="{{ products_json }}">
+                <input type="hidden" name="search_query" value="{{ search_query }}">
+                
+                <div class="btn-group">
+                    <button type="button" class="btn btn-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                        Exportar datos
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button type="submit" class="dropdown-item" name="export_type" value="csv">Exportar a CSV</button></li>
+                        <li><button type="submit" class="dropdown-item" name="export_type" value="excel">Exportar a Excel</button></li>
+                    </ul>
+                </div>
+            </form>
+        </div>
+
+        <!-- Lista de productos -->
+        <h2>Listado de Productos ({{ products|length }})</h2>
         <div class="row">
             {% for product in products %}
             <div class="col-md-4">
-                <div class="card {% if analysis.cheapest and product.price == analysis.cheapest.price and product.price > 0 %}cheapest-product{% elif analysis.most_expensive and product.price == analysis.most_expensive.price %}expensive-product{% endif %}">
-                    <img src="{{ product.image }}" class="card-img-top" alt="{{ product.title }}">
+                <div class="card product-card">
                     <div class="card-body">
-                        <h5 class="card-title">{{ product.title }}</h5>
-                        <p class="price">${{ product.price }}</p>
-                        <p class="seller-info">{{ product.seller }}</p>
-                        {% if product.sales %}
-                        <p class="sales-count">{{ product.sales }} vendidos</p>
+                        {% if product.image %}
+                        <img src="{{ product.image }}" class="card-img-top product-image mb-3" alt="{{ product.title }}">
                         {% endif %}
-                        <a href="{{ product.link }}" class="btn btn-primary" target="_blank">Ver producto</a>
+                        <h5 class="card-title">{{ product.title }}</h5>
+                        <p class="card-text">
+                            <strong>Precio:</strong> ${{ product.price }}<br>
+                            <strong>Vendedor:</strong> {{ product.seller }}<br>
+                            <strong>Ventas:</strong> {{ product.sales }}<br>
+                            <a href="{{ product.link }}" target="_blank">Ver en Mercado Libre</a>
+                        </p>
                     </div>
                 </div>
             </div>
             {% endfor %}
         </div>
-        
-        <div class="d-flex justify-content-between mt-4 mb-5">
-            <a href="/" class="btn btn-secondary">Nueva búsqueda</a>
-            
-            <div class="export-buttons">
-                <form action="/export" method="post" class="d-inline">
-                    <input type="hidden" name="products_data" value="{{ products_json }}">
-                    <input type="hidden" name="search_query" value="{{ search_query }}">
-                    <input type="hidden" name="export_type" value="csv">
-                    <button type="submit" class="btn btn-success">Exportar a CSV</button>
-                </form>
-                
-                <form action="/export" method="post" class="d-inline">
-                    <input type="hidden" name="products_data" value="{{ products_json }}">
-                    <input type="hidden" name="search_query" value="{{ search_query }}">
-                    <input type="hidden" name="export_type" value="excel">
-                    <button type="submit" class="btn btn-primary">Exportar a Excel</button>
-                </form>
-            </div>
-        </div>
     </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
