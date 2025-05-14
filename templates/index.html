@@ -3,88 +3,269 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mercado Libre Scraper</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Scraper Mercado Libre</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <style>
-        body {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-            background-color: #f8f9fa;
-        }
-        .form-container {
-            background-color: white;
-            border-radius: 10px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        .header {
-            margin-bottom: 2rem;
+        .loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
             text-align: center;
+            color: white;
         }
-        .logo-container {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 1rem;
+        .loading-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
         }
-        .logo {
-            max-width: 200px;
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+        .config-section {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .advanced-toggle {
+            cursor: pointer;
+            color: #0d6efd;
+        }
+        .advanced-options {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="logo-container">
-                <img src="https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.5/mercadolibre/logo__large_plus.png" alt="Mercado Libre Logo" class="logo">
-            </div>
-            <h1>Buscador de Productos</h1>
-        </div>
-        
-        <div class="row justify-content-center">
-            <div class="col-md-8">
-                <div class="form-container">
-                    {% if error %}
-                    <div class="alert alert-danger" role="alert">
-                        {{ error }}
+    <div class="container mt-4">
+        <h1 class="mb-4">Scraper de Mercado Libre</h1>
+
+        <!-- Panel de Configuración -->
+        <div class="config-section mb-4">
+            <h3>Configuración Global <small class="text-muted">(Afecta a todas las búsquedas)</small></h3>
+            <form action="/update_config" method="post">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Máximo de productos</label>
+                        <input type="number" class="form-control" name="max_products" value="{{ config.max_products }}">
                     </div>
-                    {% endif %}
-                    
-                    <form action="/search" method="post">
-                        <div class="mb-3">
-                            <label for="search_query" class="form-label">Término de búsqueda</label>
-                            <input type="text" class="form-control" id="search_query" name="search_query" value="{{ search_query|default('') }}" required>
-                        </div>
-                        
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="exact_match" name="exact_match">
-                            <label class="form-check-label" for="exact_match">Coincidencia exacta</label>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="seller_filter" class="form-label">Filtrar por vendedor (opcional)</label>
-                            <input type="text" class="form-control" id="seller_filter" name="seller_filter" value="{{ seller_filter|default('') }}">
-                            <div class="form-text">Deja en blanco para ver todos los vendedores</div>
-                        </div>
-                        
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="min_price" class="form-label">Precio mínimo</label>
-                                <input type="number" class="form-control" id="min_price" name="min_price" value="{{ min_price|default('0') }}" min="0">
-                            </div>
-                            
-                            <div class="col-md-6 mb-3">
-                                <label for="min_sales" class="form-label">Ventas mínimas</label>
-                                <input type="number" class="form-control" id="min_sales" name="min_sales" value="{{ min_sales|default('0') }}" min="0">
-                            </div>
-                        </div>
-                        
-                        <button type="submit" class="btn btn-primary w-100">Buscar</button>
-                    </form>
+                    <div class="col-md-3">
+                        <label class="form-label">Máximo de páginas</label>
+                        <input type="number" class="form-control" name="max_pages" value="{{ config.max_pages }}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Retraso mínimo (seg)</label>
+                        <input type="number" class="form-control" name="delay_min" value="{{ config.delay_min }}" step="0.1">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Retraso máximo (seg)</label>
+                        <input type="number" class="form-control" name="delay_max" value="{{ config.delay_max }}" step="0.1">
+                    </div>
                 </div>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-primary">Actualizar Configuración</button>
+                    <a href="/clear_cache" class="btn btn-warning ms-2">Limpiar Caché</a>
+                    <a href="/debug_info" class="btn btn-info ms-2">Ver Depuración</a>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tabs de Navegación -->
+        <ul class="nav nav-tabs mb-4" id="searchTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="product-tab" data-bs-toggle="tab" data-bs-target="#product" type="button" role="tab" aria-controls="product" aria-selected="true">Buscar por Producto</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="seller-tab" data-bs-toggle="tab" data-bs-target="#seller" type="button" role="tab" aria-controls="seller" aria-selected="false">Buscar por Vendedor</button>
+            </li>
+        </ul>
+
+        <!-- Contenido de los Tabs -->
+        <div class="tab-content" id="searchTabsContent">
+            <!-- Tab Buscar por Producto -->
+            <div class="tab-pane fade show active" id="product" role="tabpanel" aria-labelledby="product-tab">
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+
+                <form action="/search" method="post" id="searchForm">
+                    <div class="mb-3">
+                        <label for="search_query" class="form-label">Producto a buscar</label>
+                        <input type="text" class="form-control" id="search_query" name="search_query" value="{{ search_query|default('') }}">
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label for="min_price" class="form-label">Precio mínimo</label>
+                            <input type="number" class="form-control" id="min_price" name="min_price" value="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="min_sales" class="form-label">Ventas mínimas</label>
+                            <input type="number" class="form-control" id="min_sales" name="min_sales" value="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="seller_filter" class="form-label">Filtrar por vendedor</label>
+                            <input type="text" class="form-control" id="seller_filter" name="seller_filter">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="exact_match" name="exact_match">
+                            <label class="form-check-label" for="exact_match">
+                                Coincidencia exacta
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="deep_sales_search" name="deep_sales_search">
+                            <label class="form-check-label" for="deep_sales_search">
+                                Búsqueda profunda de ventas (más lenta pero más precisa)
+                            </label>
+                        </div>
+                    </div>
+
+                    <p class="advanced-toggle" onclick="toggleAdvanced('product')">▶ Opciones avanzadas</p>
+                    <div class="advanced-options" id="product-advanced">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="max_products" class="form-label">Cantidad máxima de productos</label>
+                                <input type="number" class="form-control" id="max_products" name="max_products" value="{{ config.max_products }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="max_pages" class="form-label">Cantidad máxima de páginas</label>
+                                <input type="number" class="form-control" id="max_pages" name="max_pages" value="{{ config.max_pages }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" onclick="showLoading()">Buscar</button>
+                </form>
+            </div>
+
+            <!-- Tab Buscar por Vendedor -->
+            <div class="tab-pane fade" id="seller" role="tabpanel" aria-labelledby="seller-tab">
+                <form action="/search_by_seller" method="post" id="sellerForm">
+                    <div class="mb-3">
+                        <label for="seller_name" class="form-label">Nombre del vendedor</label>
+                        <input type="text" class="form-control" id="seller_name" name="seller_name" required>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="seller_min_price" class="form-label">Precio mínimo</label>
+                            <input type="number" class="form-control" id="seller_min_price" name="min_price" value="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="seller_min_sales" class="form-label">Ventas mínimas</label>
+                            <input type="number" class="form-control" id="seller_min_sales" name="min_sales" value="0">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="seller_deep_sales_search" name="deep_sales_search">
+                            <label class="form-check-label" for="seller_deep_sales_search">
+                                Búsqueda profunda de ventas (más lenta pero más precisa)
+                            </label>
+                        </div>
+                    </div>
+
+                    <p class="advanced-toggle" onclick="toggleAdvanced('seller')">▶ Opciones avanzadas</p>
+                    <div class="advanced-options" id="seller-advanced">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="seller_max_products" class="form-label">Cantidad máxima de productos</label>
+                                <input type="number" class="form-control" id="seller_max_products" name="max_products" value="{{ config.max_products }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="seller_max_pages" class="form-label">Cantidad máxima de páginas</label>
+                                <input type="number" class="form-control" id="seller_max_pages" name="max_pages" value="{{ config.max_pages }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" onclick="showLoading()">Buscar por Vendedor</button>
+                </form>
             </div>
         </div>
     </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Overlay de Carga -->
+    <div class="loading" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner-border text-light mb-3" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <h3>Realizando búsqueda...</h3>
+            <p class="text-light">Esto puede tardar unos minutos dependiendo de los parámetros.</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function showLoading() {
+            document.getElementById('loadingOverlay').style.display = 'block';
+        }
+
+        function toggleAdvanced(section) {
+            const advancedSection = document.getElementById(section + '-advanced');
+            const toggleButton = event.target;
+            
+            if (advancedSection.style.display === 'block') {
+                advancedSection.style.display = 'none';
+                toggleButton.textContent = '▶ Opciones avanzadas';
+            } else {
+                advancedSection.style.display = 'block';
+                toggleButton.textContent = '▼ Opciones avanzadas';
+            }
+        }
+
+        // Limpiar caché mediante AJAX
+        document.querySelector('a[href="/clear_cache"]').addEventListener('click', function(e) {
+            e.preventDefault();
+            fetch('/clear_cache')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Caché limpiada correctamente');
+                    } else {
+                        alert('Error al limpiar caché: ' + data.error);
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+        });
+
+        // Mantener el tab activo después de recargar la página
+        const searchTabs = document.getElementById('searchTabs');
+        const tabElements = searchTabs.querySelectorAll('button.nav-link');
+        
+        // Recuperar el tab activo de localStorage
+        const activeTabId = localStorage.getItem('activeTab');
+        if (activeTabId) {
+            tabElements.forEach(tab => {
+                if (tab.id === activeTabId) {
+                    const triggerEl = document.querySelector('#' + activeTabId);
+                    bootstrap.Tab.getOrCreateInstance(triggerEl).show();
+                }
+            });
+        }
+
+        // Guardar el tab activo en localStorage
+        tabElements.forEach(tab => {
+            tab.addEventListener('shown.bs.tab', (event) => {
+                localStorage.setItem('activeTab', event.target.id);
+            });
+        });
+    </script>
 </body>
 </html>
