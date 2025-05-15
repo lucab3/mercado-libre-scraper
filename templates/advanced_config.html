@@ -1,0 +1,175 @@
+{% extends "layout.html" %}
+
+{% block title %}Configuración Avanzada - Scraper Mercado Libre{% endblock %}
+
+{% block additional_styles %}
+<style>
+    .config-section {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    .form-switch .form-check-input {
+        width: 3em;
+    }
+    .form-check-input:checked {
+        background-color: #198754;
+        border-color: #198754;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <h1 class="mb-4">Configuración Avanzada Anti-Bloqueo</h1>
+        
+        {% if message %}
+        <div class="alert alert-{{ message_type }}">{{ message }}</div>
+        {% endif %}
+
+        <form action="/save_advanced_config" method="post">
+            <!-- Configuración de solicitudes HTTP -->
+            <div class="config-section mb-4">
+                <h3>Configuración de Solicitudes</h3>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="max_requests_per_minute" class="form-label">Máx. solicitudes por minuto</label>
+                        <input type="number" class="form-control" id="max_requests_per_minute" name="max_requests_per_minute" value="{{ config.max_requests_per_minute }}" min="1" max="60">
+                        <div class="form-text">Establece el límite de solicitudes por minuto. Recomendado: 10-20.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="cache_ttl" class="form-label">Tiempo de vida de caché (segundos)</label>
+                        <input type="number" class="form-control" id="cache_ttl" name="cache_ttl" value="{{ config.cache_ttl }}" min="300" step="300">
+                        <div class="form-text">Tiempo que se mantiene la caché. Valores altos reducen solicitudes pero pueden dar datos desactualizados.</div>
+                    </div>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="delay_min" class="form-label">Retraso mínimo entre solicitudes (seg)</label>
+                        <input type="number" class="form-control" id="delay_min" name="delay_min" value="{{ config.delay_min }}" min="0.5" step="0.1">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="delay_max" class="form-label">Retraso máximo entre solicitudes (seg)</label>
+                        <input type="number" class="form-control" id="delay_max" name="delay_max" value="{{ config.delay_max }}" min="1.0" step="0.1">
+                    </div>
+                </div>
+                
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="use_adaptive_delay" name="use_adaptive_delay" {% if config.use_adaptive_delay %}checked{% endif %}>
+                    <label class="form-check-label" for="use_adaptive_delay">Usar retraso adaptativo</label>
+                    <div class="form-text">Ajusta automáticamente los tiempos de espera basado en el comportamiento del servidor.</div>
+                </div>
+            </div>
+            
+            <!-- Configuración de horarios -->
+            <div class="config-section mb-4">
+                <h3>Programación de Búsquedas</h3>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="scheduler_enabled" name="scheduler_enabled" {% if config.scheduler_enabled %}checked{% endif %} onchange="toggleSchedulerOptions()">
+                    <label class="form-check-label" for="scheduler_enabled">Activar programador de tareas</label>
+                    <div class="form-text">Permite programar búsquedas para ejecutarse en momentos específicos.</div>
+                </div>
+                
+                <div id="scheduler-options" style="display: {% if config.scheduler_enabled %}block{% else %}none{% endif %}">
+                    <h5>Horas de bajo tráfico (recomendado para búsquedas intensivas)</h5>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="low_traffic_start" class="form-label">Hora de inicio</label>
+                            <select class="form-select" id="low_traffic_start" name="low_traffic_start">
+                                {% for hour in range(24) %}
+                                <option value="{{ hour }}" {% if config.low_traffic_hours.start == hour %}selected{% endif %}>{{ "%02d:00"|format(hour) }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="low_traffic_end" class="form-label">Hora de fin</label>
+                            <select class="form-select" id="low_traffic_end" name="low_traffic_end">
+                                {% for hour in range(24) %}
+                                <option value="{{ hour }}" {% if config.low_traffic_hours.end == hour %}selected{% endif %}>{{ "%02d:00"|format(hour) }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-text mb-3">Durante estas horas, el sistema puede realizar más solicitudes con menos riesgo de ser bloqueado.</div>
+                </div>
+            </div>
+            
+            <!-- Configuración de rotación de IPs -->
+            <div class="config-section mb-4">
+                <h3>Rotación de IPs</h3>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="enable_proxy" name="enable_proxy" {% if config.enable_proxy %}checked{% endif %} onchange="toggleProxyOptions()">
+                    <label class="form-check-label" for="enable_proxy">Activar rotación de IPs</label>
+                    <div class="form-text">Usa diferentes IPs para las solicitudes. Requiere configuración adicional.</div>
+                </div>
+                
+                <div id="proxy-options" style="display: {% if config.enable_proxy %}block{% else %}none{% endif %}">
+                    <div class="mb-3">
+                        <label for="proxy_type" class="form-label">Tipo de proxy</label>
+                        <select class="form-select" id="proxy_type" name="proxy_type" onchange="toggleProxyType()">
+                            <option value="none" {% if config.proxy_config.type == 'none' %}selected{% endif %}>Ninguno</option>
+                            <option value="list" {% if config.proxy_config.type == 'list' %}selected{% endif %}>Lista manual</option>
+                            <option value="service" {% if config.proxy_config.type == 'service' %}selected{% endif %}>Servicio externo</option>
+                        </select>
+                    </div>
+                    
+                    <div id="proxy-list" style="display: {% if config.proxy_config.type == 'list' %}block{% else %}none{% endif %}">
+                        <div class="mb-3">
+                            <label for="proxy_list" class="form-label">Lista de proxies</label>
+                            <textarea class="form-control" id="proxy_list_text" name="proxy_list_text" rows="5" placeholder="formato: ip:puerto o ip:puerto:usuario:contraseña, uno por línea">{{ '\n'.join(config.proxy_config.list) }}</textarea>
+                            <div class="form-text">Ingresa un proxy por línea en formato IP:PUERTO o IP:PUERTO:USUARIO:CONTRASEÑA</div>
+                        </div>
+                    </div>
+                    
+                    <div id="proxy-service" style="display: {% if config.proxy_config.type == 'service' %}block{% else %}none{% endif %}">
+                        <div class="mb-3">
+                            <label for="service_name" class="form-label">Servicio</label>
+                            <select class="form-select" id="service_name" name="service_name">
+                                <option value="brightdata" {% if config.proxy_config.service_name == 'brightdata' %}selected{% endif %}>BrightData</option>
+                                <option value="smartproxy" {% if config.proxy_config.service_name == 'smartproxy' %}selected{% endif %}>SmartProxy</option>
+                                <option value="oxylabs" {% if config.proxy_config.service_name == 'oxylabs' %}selected{% endif %}>Oxylabs</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="api_key" class="form-label">API Key / Contraseña</label>
+                            <input type="password" class="form-control" id="api_key" name="api_key" value="{{ config.proxy_config.api_key }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Usuario</label>
+                            <input type="text" class="form-control" id="username" name="username" value="{{ config.proxy_config.username }}">
+                        </div>
+                        <div class="alert alert-info">
+                            <strong>Nota:</strong> El uso de servicios de proxy generalmente requiere una suscripción. Consulta la documentación de tu proveedor para más detalles.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Guardar configuración</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function toggleSchedulerOptions() {
+        const schedulerEnabled = document.getElementById('scheduler_enabled').checked;
+        document.getElementById('scheduler-options').style.display = schedulerEnabled ? 'block' : 'none';
+    }
+    
+    function toggleProxyOptions() {
+        const proxyEnabled = document.getElementById('enable_proxy').checked;
+        document.getElementById('proxy-options').style.display = proxyEnabled ? 'block' : 'none';
+    }
+    
+    function toggleProxyType() {
+        const proxyType = document.getElementById('proxy_type').value;
+        document.getElementById('proxy-list').style.display = proxyType === 'list' ? 'block' : 'none';
+        document.getElementById('proxy-service').style.display = proxyType === 'service' ? 'block' : 'none';
+    }
+</script>
+{% endblock %}
