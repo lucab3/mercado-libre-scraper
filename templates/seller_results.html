@@ -1,32 +1,32 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Resultados del Vendedor - {{ seller_name }}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <style>
-        .product-card {
-            margin-bottom: 20px;
-            height: 100%;
-        }
-        .product-image {
-            height: 200px;
-            object-fit: contain;
-        }
-        .performance-data {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        .highlight {
-            background-color: #e2f3e5;
-        }
-    </style>
-</head>
-<body>
-    <div class="container mt-4">
+{% extends "layout.html" %}
+
+{% block title %}Resultados del Vendedor - {{ seller_name }}{% endblock %}
+
+{% block additional_styles %}
+<style>
+    .product-card {
+        margin-bottom: 20px;
+        height: 100%;
+    }
+    .product-image {
+        height: 200px;
+        object-fit: contain;
+    }
+    .performance-data {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    .highlight {
+        background-color: #e2f3e5;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
         <h1 class="mb-4">Productos del Vendedor: {{ seller_name }}</h1>
 
         <!-- Información de rendimiento -->
@@ -151,7 +151,5 @@
             {% endfor %}
         </div>
     </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+</div>
+{% endblock %}
