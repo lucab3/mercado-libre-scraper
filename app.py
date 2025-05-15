@@ -5,7 +5,7 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, send_file, redirect, url_for, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import difflib
 import webbrowser
@@ -17,6 +17,7 @@ import sys
 import traceback
 from functools import lru_cache
 import random
+import uuid
 
 # Configuración de logging
 logging.basicConfig(
@@ -33,31 +34,612 @@ app = Flask(__name__)
 
 # Configuración global para el scraper
 CONFIG = {
-    'max_products': 20,  # Número máximo de productos a buscar (ajustable desde la interfaz)
-    'max_pages': 2,      # Número máximo de páginas a buscar (ajustable desde la interfaz)
-    'delay_min': 1.0,    # Tiempo mínimo entre solicitudes (segundos)
-    'delay_max': 2.5,    # Tiempo máximo entre solicitudes (segundos)
-    'cache_ttl': 3600,   # Tiempo de vida de la caché (1 hora)
-    'deep_sales_search': False  # Por defecto no usar búsqueda profunda de ventas
+    'max_products': 20,              # Número máximo de productos a buscar
+    'max_pages': 2,                  # Número máximo de páginas a buscar
+    'delay_min': 1.0,                # Tiempo mínimo entre solicitudes (segundos)
+    'delay_max': 2.5,                # Tiempo máximo entre solicitudes (segundos)
+    'cache_ttl': 3600,               # Tiempo de vida de la caché (1 hora)
+    'deep_sales_search': False,      # Por defecto no usar búsqueda profunda de ventas
+    'max_requests_per_minute': 15,   # Límite de solicitudes por minuto
+    'cache_file': 'request_cache.json',  # Archivo de caché
+    'use_adaptive_delay': True,      # Activar retraso adaptativo
+    'enable_proxy': False,           # Activar rotación de IPs
+    'proxy_config': {                # Configuración de proxies
+        'type': 'none',              # 'none', 'list', 'service'
+        'list': [],                  # Lista manual de proxies
+        'service_name': '',          # Nombre del servicio (brightdata, smartproxy, etc.)
+        'api_key': '',               # API key del servicio
+        'username': ''               # Usuario del servicio
+    },
+    'scheduler_enabled': False,      # Activar programador de tareas
+    'low_traffic_hours': {           # Horas de bajo tráfico (0-23)
+        'start': 22,                 # Hora de inicio (22:00)
+        'end': 6                     # Hora de fin (06:00)
+    }
 }
+
+# Variables globales para los componentes
+request_manager = None
+proxy_manager = None
+task_scheduler = None
+adaptive_delay = None
+
+class AdaptiveDelay:
+    """
+    Gestiona retrasos adaptativos basados en el comportamiento del servidor.
+    Incrementa automáticamente los tiempos de espera si detecta señales de bloqueo.
+    """
+    def __init__(self, min_delay=1.0, max_delay=3.0, backoff_factor=1.5, max_backoff=30):
+        self.min_delay = min_delay
+        self.max_delay = max_delay
+        self.current_min = min_delay
+        self.current_max = max_delay
+        self.backoff_factor = backoff_factor
+        self.max_backoff = max_backoff
+        self.consecutive_errors = 0
+        self.request_count = 0
+        self.last_request_time = 0
+        
+    def get_delay(self):
+        """Calcula el tiempo de espera basado en el estado actual"""
+        # Si hemos tenido errores consecutivos, aumentar el retraso
+        if self.consecutive_errors > 0:
+            delay = min(
+                self.current_min * (self.backoff_factor ** self.consecutive_errors),
+                self.max_backoff
+            )
+            return random.uniform(delay, delay * 1.25)
+        
+        # Retraso normal aleatorio
+        return random.uniform(self.current_min, self.current_max)
+    
+    def success(self):
+        """Registrar una solicitud exitosa"""
+        self.request_count += 1
+        self.consecutive_errors = 0
+        
+        # Cada 20 solicitudes exitosas, reducir ligeramente los tiempos (si están elevados)
+        if self.request_count % 20 == 0 and self.current_min > self.min_delay:
+            self.current_min = max(self.current_min * 0.9, self.min_delay)
+            self.current_max = max(self.current_max * 0.9, self.max_delay)
+        
+    def error(self, error_type=None):
+        """Registrar un error y ajustar los retrasos"""
+        self.consecutive_errors += 1
+        
+        # Aumentar los tiempos de retraso
+        self.current_min = min(self.current_min * self.backoff_factor, self.max_backoff/2)
+        self.current_max = min(self.current_max * self.backoff_factor, self.max_backoff)
+        
+        # Si recibimos muchos errores consecutivos, podemos implementar una pausa larga
+        if self.consecutive_errors >= 5:
+            logger.warning(f"Detectados {self.consecutive_errors} errores consecutivos. Implementando pausa larga.")
+            return True
+        return False
+    
+    def should_pause(self):
+        """Determina si debemos hacer una pausa larga en las solicitudes"""
+        return self.consecutive_errors >= 5
+
+class ProxyManager:
+    """
+    Gestiona una lista de proxies para rotación de IPs.
+    Se puede implementar con diferentes proveedores.
+    """
+    def __init__(self, proxy_config=None):
+        self.proxy_config = proxy_config or {}
+        self.proxy_list = []
+        self.current_index = 0
+        self.proxy_errors = {}  # Tracking de errores por proxy
+        self.enabled = False
+        
+        # Inicializar según configuración
+        self._initialize()
+        
+    def _initialize(self):
+        """Inicializa el gestor de proxies según configuración"""
+        proxy_type = self.proxy_config.get('type', 'none')
+        
+        if proxy_type == 'none':
+            logger.info("Rotación de IPs desactivada")
+            self.enabled = False
+            return
+            
+        elif proxy_type == 'list':
+            # Lista manual de proxies
+            self.proxy_list = self.proxy_config.get('list', [])
+            logger.info(f"Inicializado gestor de proxies con {len(self.proxy_list)} proxies manuales")
+            
+        elif proxy_type == 'service':
+            # Servicio externo de proxies
+            service_name = self.proxy_config.get('service_name')
+            api_key = self.proxy_config.get('api_key')
+            
+            if service_name and api_key:
+                try:
+                    self._load_from_service(service_name, api_key)
+                except Exception as e:
+                    logger.error(f"Error al cargar proxies del servicio {service_name}: {str(e)}")
+            else:
+                logger.error("Configuración incompleta para servicio de proxies")
+                self.enabled = False
+                return
+        
+        # Verificar si tenemos proxies disponibles
+        if len(self.proxy_list) > 0:
+            self.enabled = True
+            logger.info(f"Rotación de IPs activada con {len(self.proxy_list)} proxies")
+        else:
+            logger.warning("No hay proxies disponibles, desactivando rotación de IPs")
+            self.enabled = False
+    
+    def _load_from_service(self, service_name, api_key):
+        """Carga proxies desde un servicio externo"""
+        if service_name == 'brightdata':
+            # Ejemplo para BrightData
+            self._load_from_brightdata(api_key)
+        elif service_name == 'smartproxy':
+            # Ejemplo para SmartProxy
+            pass
+        elif service_name == 'oxylabs':
+            # Ejemplo para Oxylabs
+            pass
+        else:
+            logger.error(f"Servicio de proxies desconocido: {service_name}")
+    
+    def _load_from_brightdata(self, api_key):
+        """
+        Carga proxies desde BrightData
+        NOTA: Este es solo un ejemplo, deberás implementar según la API de tu proveedor
+        """
+        logger.info("Cargando proxies desde BrightData")
+        # En una implementación real, harías una solicitud a la API de BrightData
+        username = self.proxy_config.get('username', '')
+        password = api_key
+        
+        if username and password:
+            # Formato común para el proxy de BrightData
+            zones = ['zone1', 'zone2', 'zone3']  # Diferentes zonas/países
+            
+            for zone in zones:
+                proxy = f"brd.superproxy.io:22225:{username}-zone-{zone}:{password}"
+                self.proxy_list.append({
+                    'http': f"http://{proxy}",
+                    'https': f"http://{proxy}",
+                    'zone': zone
+                })
+                
+            logger.info(f"Cargados {len(self.proxy_list)} proxies de BrightData")
+        else:
+            logger.error("Credenciales incompletas para BrightData")
+    
+    def get_proxy(self):
+        """
+        Obtiene el próximo proxy de la lista
+        
+        Returns:
+            dict or None: Diccionario de proxy para requests o None si está desactivado
+        """
+        if not self.enabled or not self.proxy_list:
+            return None
+            
+        # Obtener proxy actual y avanzar al siguiente
+        proxy = self.proxy_list[self.current_index]
+        self.current_index = (self.current_index + 1) % len(self.proxy_list)
+        
+        return proxy
+    
+    def report_error(self, proxy, error_type):
+        """
+        Reporta un error con un proxy específico
+        
+        Args:
+            proxy (dict): El proxy que falló
+            error_type (str): Tipo de error
+        """
+        if not proxy:
+            return
+            
+        proxy_str = str(proxy)
+        if proxy_str not in self.proxy_errors:
+            self.proxy_errors[proxy_str] = {'count': 0, 'types': {}}
+            
+        self.proxy_errors[proxy_str]['count'] += 1
+        
+        if error_type not in self.proxy_errors[proxy_str]['types']:
+            self.proxy_errors[proxy_str]['types'][error_type] = 0
+            
+        self.proxy_errors[proxy_str]['types'][error_type] += 1
+        
+        # Si un proxy tiene muchos errores, podemos eliminarlo temporalmente
+        if self.proxy_errors[proxy_str]['count'] >= 5:
+            logger.warning(f"Proxy {proxy_str} ha fallado demasiadas veces, removiendo temporalmente")
+            try:
+                self.proxy_list.remove(proxy)
+            except ValueError:
+                pass
+            
+            # Si no quedan proxies, desactivar
+            if not self.proxy_list:
+                logger.error("No quedan proxies disponibles, desactivando rotación de IPs")
+                self.enabled = False
+    
+    def report_success(self, proxy):
+        """Reporta un uso exitoso de un proxy"""
+        if not proxy:
+            return
+            
+        proxy_str = str(proxy)
+        if proxy_str in self.proxy_errors:
+            # Reducir contador de errores en caso de éxito
+            self.proxy_errors[proxy_str]['count'] = max(0, self.proxy_errors[proxy_str]['count'] - 1)
+    
+    def is_enabled(self):
+        """Verifica si la rotación de IPs está activada"""
+        return self.enabled
+
+class RequestManager:
+    """
+    Gestiona las solicitudes HTTP con estrategias para evitar bloqueos.
+    Implementa rate limiting, caché, y gestión de sesiones.
+    """
+    def __init__(self, 
+                 max_requests_per_minute=20, 
+                 session_reset_after=20,
+                 cache_ttl=3600,
+                 cache_file="request_cache.json"):
+        self.session = requests.Session()
+        self.max_requests_per_minute = max_requests_per_minute
+        self.session_reset_after = session_reset_after
+        self.request_timestamps = []
+        self.request_count = 0
+        self.cache = {}
+        self.cache_ttl = cache_ttl
+        self.cache_file = cache_file
+        
+        # Cargar caché desde disco si existe
+        self._load_cache()
+        
+    def _load_cache(self):
+        """Carga la caché desde el archivo"""
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                    
+                # Filtrar entradas caducadas
+                now = time.time()
+                valid_cache = {}
+                for url, data in cache_data.items():
+                    if now - data['timestamp'] < self.cache_ttl:
+                        valid_cache[url] = data
+                
+                self.cache = valid_cache
+                logger.info(f"Caché cargada con {len(self.cache)} URLs válidas")
+        except Exception as e:
+            logger.error(f"Error al cargar la caché: {str(e)}")
+            self.cache = {}
+            
+    def _save_cache(self):
+        """Guarda la caché en el archivo"""
+        try:
+            # Asegurar que el directorio existe
+            os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+            
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, ensure_ascii=False)
+            logger.debug(f"Caché guardada con {len(self.cache)} URLs")
+        except Exception as e:
+            logger.error(f"Error al guardar la caché: {str(e)}")
+    
+    def get(self, url, cache=True, force_new=False):
+        """
+        Realiza una solicitud GET con gestión inteligente para evitar bloqueos
+        
+        Args:
+            url (str): URL a solicitar
+            cache (bool): Si se debe usar caché
+            force_new (bool): Si se debe forzar una nueva solicitud
+            
+        Returns:
+            str: Contenido HTML de la respuesta
+        """
+        # Verificar caché si está habilitada y no se fuerza nueva solicitud
+        if cache and not force_new and url in self.cache:
+            cached_data = self.cache[url]
+            # Verificar si la caché está vigente
+            if time.time() - cached_data['timestamp'] < self.cache_ttl:
+                logger.debug(f"Usando caché para: {url}")
+                return cached_data['content']
+        
+        # Limitar la tasa de solicitudes
+        self._rate_limit()
+        
+        # Renovar sesión periódicamente
+        if self.request_count >= self.session_reset_after:
+            logger.debug("Reiniciando sesión HTTP")
+            self.session = requests.Session()
+            self.request_count = 0
+            
+        # Obtener retraso adaptativo
+        if adaptive_delay and CONFIG['use_adaptive_delay']:
+            delay = adaptive_delay.get_delay()
+        else:
+            delay = random.uniform(CONFIG['delay_min'], CONFIG['delay_max'])
+            
+        logger.debug(f"Esperando {delay:.2f} segundos antes de la solicitud")
+        time.sleep(delay)
+        
+        # Headers aleatorios
+        headers = get_random_headers()
+        
+        # Obtener proxy si está habilitado
+        proxy = None
+        if proxy_manager and proxy_manager.is_enabled():
+            proxy = proxy_manager.get_proxy()
+            logger.debug(f"Usando proxy: {proxy}")
+        
+        try:
+            # Registrar timestamp para rate limiting
+            self.request_timestamps.append(time.time())
+            self.request_count += 1
+            
+            # Realizar la solicitud
+            response = self.session.get(url, headers=headers, proxies=proxy, timeout=15)
+            response.raise_for_status()
+            
+            # Actualizar retraso adaptativo
+            if adaptive_delay and CONFIG['use_adaptive_delay']:
+                adaptive_delay.success()
+                
+            # Reportar éxito del proxy si se usó
+            if proxy_manager and proxy_manager.is_enabled() and proxy:
+                proxy_manager.report_success(proxy)
+            
+            # Guardar en caché si está habilitada
+            if cache:
+                self.cache[url] = {
+                    'content': response.text,
+                    'timestamp': time.time()
+                }
+                # Guardar caché cada 10 solicitudes
+                if len(self.request_timestamps) % 10 == 0:
+                    self._save_cache()
+            
+            return response.text
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if hasattr(e, 'response') else None
+            logger.error(f"Error HTTP {status_code} al solicitar {url}: {str(e)}")
+            
+            # Reportar error del proxy si se usó
+            if proxy_manager and proxy_manager.is_enabled() and proxy:
+                proxy_manager.report_error(proxy, "http_error")
+            
+            # Actualizar retraso adaptativo
+            if adaptive_delay and CONFIG['use_adaptive_delay']:
+                if status_code:
+                    error_type = "rate_limit" if status_code == 429 else "server_error"
+                    needs_pause = adaptive_delay.error(error_type)
+                    if needs_pause:
+                        logger.warning(f"Implementando pausa larga de 120 segundos debido a error {status_code}")
+                        time.sleep(120)  # Pausa larga en caso de muchos errores
+            
+            raise
+        except Exception as e:
+            logger.error(f"Error al solicitar {url}: {str(e)}")
+            
+            # Reportar error del proxy si se usó
+            if proxy_manager and proxy_manager.is_enabled() and proxy:
+                proxy_manager.report_error(proxy, "connection_error")
+                
+            # Actualizar retraso adaptativo
+            if adaptive_delay and CONFIG['use_adaptive_delay']:
+                adaptive_delay.error("connection_error")
+                
+            raise
+            
+    def _rate_limit(self):
+        """Implementa rate limiting para mantener las solicitudes bajo el límite"""
+        now = time.time()
+        
+        # Filtrar timestamps de la último minuto
+        minute_ago = now - 60
+        self.request_timestamps = [ts for ts in self.request_timestamps if ts > minute_ago]
+        
+        # Si hemos alcanzado el límite, esperar
+        if len(self.request_timestamps) >= self.max_requests_per_minute:
+            # Calcular tiempo a esperar
+            oldest = min(self.request_timestamps)
+            wait_time = 60 - (now - oldest) + 1  # +1 segundo adicional por seguridad
+            
+            logger.warning(f"Rate limit alcanzado. Esperando {wait_time:.2f} segundos")
+            time.sleep(max(0, wait_time))
+        
+    def clear_cache(self):
+        """Limpia la caché"""
+        self.cache = {}
+        if os.path.exists(self.cache_file):
+            os.remove(self.cache_file)
+        logger.info("Caché limpiada correctamente")
+
+class TaskScheduler:
+    """
+    Scheduler para programar y distribuir las tareas de scraping en el tiempo.
+    Permite programar búsquedas en horarios específicos o distribuirlas.
+    """
+    def __init__(self, db_file="scheduled_tasks.json"):
+        self.db_file = db_file
+        self.tasks = []
+        self._load_tasks()
+        
+    def _load_tasks(self):
+        """Carga las tareas programadas desde el archivo"""
+        try:
+            if os.path.exists(self.db_file):
+                with open(self.db_file, 'r', encoding='utf-8') as f:
+                    self.tasks = json.load(f)
+                logger.info(f"Cargadas {len(self.tasks)} tareas programadas")
+        except Exception as e:
+            logger.error(f"Error al cargar tareas programadas: {str(e)}")
+            self.tasks = []
+            
+    def _save_tasks(self):
+        """Guarda las tareas programadas en el archivo"""
+        try:
+            with open(self.db_file, 'w', encoding='utf-8') as f:
+                json.dump(self.tasks, f, ensure_ascii=False, indent=2)
+            logger.debug(f"Guardadas {len(self.tasks)} tareas programadas")
+        except Exception as e:
+            logger.error(f"Error al guardar tareas programadas: {str(e)}")
+    
+    def add_task(self, task_type, params, schedule_time=None, recurrence=None):
+        """
+        Añade una nueva tarea programada
+        
+        Args:
+            task_type (str): Tipo de tarea ('product_search' o 'seller_search')
+            params (dict): Parámetros de la búsqueda
+            schedule_time (datetime): Momento de ejecución (None = inmediato)
+            recurrence (str): Recurrencia ('daily', 'weekly', 'monthly', None = una vez)
+            
+        Returns:
+            str: ID de la tarea
+        """
+        task_id = str(uuid.uuid4())
+        
+        task = {
+            'id': task_id,
+            'type': task_type,
+            'params': params,
+            'created_at': datetime.now().isoformat(),
+            'schedule_time': schedule_time.isoformat() if schedule_time else None,
+            'recurrence': recurrence,
+            'status': 'pending',
+            'last_run': None,
+            'next_run': schedule_time.isoformat() if schedule_time else datetime.now().isoformat()
+        }
+        
+        self.tasks.append(task)
+        self._save_tasks()
+        
+        return task_id
+    
+    def get_pending_tasks(self):
+        """
+        Obtiene las tareas pendientes que deben ejecutarse ahora
+        
+        Returns:
+            list: Lista de tareas pendientes
+        """
+        now = datetime.now()
+        pending = []
+        
+        for task in self.tasks:
+            if task['status'] == 'pending' and task['next_run']:
+                next_run = datetime.fromisoformat(task['next_run'])
+                if next_run <= now:
+                    pending.append(task)
+                    
+        return pending
+    
+    def update_task_status(self, task_id, status, result=None):
+        """
+        Actualiza el estado de una tarea
+        
+        Args:
+            task_id (str): ID de la tarea
+            status (str): Nuevo estado ('running', 'completed', 'failed')
+            result (dict): Resultado de la ejecución
+        """
+        for task in self.tasks:
+            if task['id'] == task_id:
+                task['status'] = status
+                task['last_run'] = datetime.now().isoformat()
+                
+                if result:
+                    task['last_result'] = result
+                    
+                # Si es recurrente, programar la próxima ejecución
+                if task['recurrence']:
+                    next_run = datetime.fromisoformat(task['last_run'])
+                    
+                    if task['recurrence'] == 'daily':
+                        next_run = next_run + timedelta(days=1)
+                    elif task['recurrence'] == 'weekly':
+                        next_run = next_run + timedelta(weeks=1)
+                    elif task['recurrence'] == 'monthly':
+                        # Aproximación simple para mes siguiente
+                        if next_run.month == 12:
+                            next_run = next_run.replace(year=next_run.year+1, month=1)
+                        else:
+                            next_run = next_run.replace(month=next_run.month+1)
+                            
+                    task['next_run'] = next_run.isoformat()
+                    task['status'] = 'pending'
+                
+                self._save_tasks()
+                break
+                
+    def delete_task(self, task_id):
+        """Elimina una tarea programada"""
+        self.tasks = [task for task in self.tasks if task['id'] != task_id]
+        self._save_tasks()
+        
+    def get_task(self, task_id):
+        """Obtiene una tarea por su ID"""
+        for task in self.tasks:
+            if task['id'] == task_id:
+                return task
+        return None
+        
+    def get_all_tasks(self):
+        """Obtiene todas las tareas"""
+        return self.tasks
 
 def open_browser():
     webbrowser.open_new('http://127.0.0.1:5000/')
 
-# Cache para almacenar resultados de solicitudes HTTP
-@lru_cache(maxsize=100)
-def cached_request(url, cache_key=None):
-    """Hacer solicitud HTTP con caché"""
-    logger.debug(f"Realizando solicitud a {url}")
-    headers = get_random_headers()
+def init_components():
+    """Inicializa los componentes según la configuración"""
+    global request_manager, proxy_manager, task_scheduler, adaptive_delay
     
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.text
-    except Exception as e:
-        logger.error(f"Error en solicitud HTTP a {url}: {str(e)}")
-        raise
+    # Inicializar el gestor de retrasos adaptativos
+    adaptive_delay = AdaptiveDelay(
+        min_delay=CONFIG['delay_min'],
+        max_delay=CONFIG['delay_max']
+    )
+    
+    # Inicializar el gestor de proxies si está habilitado
+    if CONFIG['enable_proxy']:
+        proxy_manager = ProxyManager(CONFIG['proxy_config'])
+    else:
+        proxy_manager = ProxyManager({'type': 'none'})
+    
+    # Inicializar el gestor de solicitudes
+    request_manager = RequestManager(
+        max_requests_per_minute=CONFIG['max_requests_per_minute'],
+        session_reset_after=20,
+        cache_ttl=CONFIG['cache_ttl'],
+        cache_file=CONFIG['cache_file']
+    )
+    
+    # Inicializar el programador de tareas si está habilitado
+    if CONFIG['scheduler_enabled']:
+        task_scheduler = TaskScheduler()
+
+def is_low_traffic_hour():
+    """Verifica si estamos en horas de bajo tráfico"""
+    now = datetime.now()
+    start = CONFIG['low_traffic_hours']['start']
+    end = CONFIG['low_traffic_hours']['end']
+    
+    current_hour = now.hour
+    
+    # Si start > end, significa que el rango cruza la medianoche
+    if start > end:
+        return current_hour >= start or current_hour < end
+    else:
+        return start <= current_hour < end
 
 def get_random_headers():
     """Generar headers aleatorios para evitar bloqueos"""
@@ -65,21 +647,73 @@ def get_random_headers():
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.55 Safari/537.36'
+    ]
+    
+    accept_languages = [
+        'es-ES,es;q=0.9,en;q=0.8',
+        'es-AR,es;q=0.9,es-419;q=0.8,en;q=0.7',
+        'es-MX,es;q=0.9,es-ES;q=0.8,en;q=0.7',
+        'en-US,en;q=0.9,es;q=0.8',
+        'es,en;q=0.8,es-ES;q=0.7'
     ]
     
     return {
         'User-Agent': random.choice(user_agents),
-        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
+        'Accept-Language': random.choice(accept_languages),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Referer': 'https://www.mercadolibre.com.ar/'
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.mercadolibre.com.ar/' if random.random() < 0.7 else 'https://www.google.com/'
     }
+
+def get_html(url, use_cache=True):
+    """
+    Función centralizada para obtener HTML con todas las protecciones.
+    Reemplaza las llamadas directas a requests.get() y cached_request()
+    """
+    # Inicializar componentes si es necesario
+    if request_manager is None:
+        init_components()
+    
+    # Verificar si estamos en horas de bajo tráfico para ajustar parámetros
+    if is_low_traffic_hour():
+        # En horas de bajo tráfico podemos ser más agresivos
+        request_manager.max_requests_per_minute = CONFIG['max_requests_per_minute'] * 1.5
+        adaptive_delay.current_min = max(CONFIG['delay_min'] * 0.7, 0.5)
+        adaptive_delay.current_max = max(CONFIG['delay_max'] * 0.7, 1.5)
+    else:
+        # En horas normales, usar los valores por defecto
+        request_manager.max_requests_per_minute = CONFIG['max_requests_per_minute']
+        adaptive_delay.current_min = CONFIG['delay_min']
+        adaptive_delay.current_max = CONFIG['delay_max']
+    
+    # Hacer la solicitud a través del gestor
+    try:
+        html = request_manager.get(url, cache=use_cache)
+        return html
+    except Exception as e:
+        logger.error(f"Error al obtener HTML de {url}: {str(e)}")
+        raise
+
+# Mantener función de compatibilidad para no romper código existente
+def cached_request(url, cache_key=None):
+    """Función de compatibilidad - usa get_html internamente"""
+    return get_html(url, use_cache=True)
 
 def random_delay():
     """Genera una pausa aleatoria para evitar ser detectado como bot"""
-    delay = random.uniform(CONFIG['delay_min'], CONFIG['delay_max'])
+    if adaptive_delay and CONFIG['use_adaptive_delay']:
+        delay = adaptive_delay.get_delay()
+    else:
+        delay = random.uniform(CONFIG['delay_min'], CONFIG['delay_max'])
+    
     logger.debug(f"Esperando {delay:.2f} segundos")
     time.sleep(delay)
 
@@ -313,8 +947,8 @@ def extract_sales_count(element, get_from_detail=False, product_url=None):
                 logger.debug(f"Accediendo a página de detalle: {product_link}")
                 
                 try:
-                    # Usar caché para la página de detalle
-                    detail_html = cached_request(product_link)
+                    # Usar el gestor de solicitudes en lugar de cached_request
+                    detail_html = get_html(product_link)
                     
                     # Analizar el HTML de la página de detalle
                     detail_soup = BeautifulSoup(detail_html, 'html.parser')
@@ -353,9 +987,6 @@ def extract_sales_count(element, get_from_detail=False, product_url=None):
                                 
                     logger.debug("No se encontraron ventas en la página de detalle")
                     
-                    # Añade este tiempo de espera después de cada solicitud de detalle
-                    random_delay()
-                    
                 except Exception as e:
                     logger.error(f"Error al acceder a la página de detalle: {str(e)}")
                     logger.error(traceback.format_exc())
@@ -372,6 +1003,10 @@ def scrape_mercado_libre(search_query, exact_match=False, max_pages=None, seller
     """Función principal de web scraping para Mercado Libre"""
     formatted_query = search_query.replace(' ', '-')
     
+    # Inicializar componentes si aún no se ha hecho
+    if request_manager is None:
+        init_components()
+    
     # Usar valores de configuración si no se proporcionan
     if max_pages is None:
         max_pages = CONFIG['max_pages']
@@ -384,6 +1019,7 @@ def scrape_mercado_libre(search_query, exact_match=False, max_pages=None, seller
     products = []
     debug_info = []
     total_products_found = 0
+    page = 0
     
     # Determinar si estamos buscando por tienda
     is_store_search = 'tienda/' in formatted_query or seller_filter is not None
@@ -407,8 +1043,8 @@ def scrape_mercado_libre(search_query, exact_match=False, max_pages=None, seller
                 logger.info(f"Scrapeando página normal número {page + 1}: {url}")
             
             try:
-                # Usar caché para la página de resultados
-                html_content = cached_request(url)
+                # Usar el gestor de solicitudes para obtener HTML
+                html_content = get_html(url)
                 
                 # Guardar HTML para debug si es necesario
                 with open(f"debug_page_{page+1}.html", "w", encoding="utf-8") as f:
@@ -582,8 +1218,7 @@ def scrape_mercado_libre(search_query, exact_match=False, max_pages=None, seller
                     # Añadir información de depuración
                     debug_info.append(product_debug)
 
-                # Pausa entre páginas para evitar ser bloqueado
-                random_delay()
+                # No necesitamos random_delay aquí - ya está gestionado por el request_manager
 
             except Exception as e:
                 logger.error(f"Error en el scraping de la página {page+1}: {str(e)}", exc_info=True)
@@ -698,6 +1333,13 @@ def update_config():
         CONFIG['delay_min'] = float(request.form.get('delay_min', CONFIG['delay_min']))
         CONFIG['delay_max'] = float(request.form.get('delay_max', CONFIG['delay_max']))
         CONFIG['deep_sales_search'] = request.form.get('deep_sales_search') == 'on'
+        
+        # Re-inicializar componentes si están activos
+        if adaptive_delay:
+            adaptive_delay.min_delay = CONFIG['delay_min']
+            adaptive_delay.max_delay = CONFIG['delay_max']
+            adaptive_delay.current_min = CONFIG['delay_min']
+            adaptive_delay.current_max = CONFIG['delay_max']
         
         logger.info(f"Configuración actualizada: {CONFIG}")
         return redirect(url_for('index'))
@@ -908,13 +1550,227 @@ def debug_info():
 def clear_cache():
     """Limpia la caché de solicitudes HTTP"""
     try:
-        cached_request.cache_clear()
+        # Usar el request manager para limpiar caché si está disponible
+        if request_manager:
+            request_manager.clear_cache()
+        else:
+            # Compatibilidad con la versión anterior
+            cached_request.cache_clear()
+            
         logger.info("Cache limpiada correctamente")
         return jsonify({"success": True, "message": "Cache limpiada correctamente"})
     except Exception as e:
         logger.error(f"Error al limpiar la cache: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/advanced_config')
+def advanced_config():
+    """Muestra la página de configuración avanzada"""
+    return render_template('advanced_config.html', config=CONFIG, message=None, message_type=None)
+
+@app.route('/save_advanced_config', methods=['POST'])
+def save_advanced_config():
+    """Guarda la configuración avanzada"""
+    try:
+        # Configuración de solicitudes
+        CONFIG['max_requests_per_minute'] = int(request.form.get('max_requests_per_minute', CONFIG['max_requests_per_minute']))
+        CONFIG['cache_ttl'] = int(request.form.get('cache_ttl', CONFIG['cache_ttl']))
+        CONFIG['delay_min'] = float(request.form.get('delay_min', CONFIG['delay_min']))
+        CONFIG['delay_max'] = float(request.form.get('delay_max', CONFIG['delay_max']))
+        CONFIG['use_adaptive_delay'] = request.form.get('use_adaptive_delay') == 'on'
+        
+        # Programación de búsquedas
+        CONFIG['scheduler_enabled'] = request.form.get('scheduler_enabled') == 'on'
+        CONFIG['low_traffic_hours']['start'] = int(request.form.get('low_traffic_start', CONFIG['low_traffic_hours']['start']))
+        CONFIG['low_traffic_hours']['end'] = int(request.form.get('low_traffic_end', CONFIG['low_traffic_hours']['end']))
+        
+        # Rotación de IPs
+        CONFIG['enable_proxy'] = request.form.get('enable_proxy') == 'on'
+        CONFIG['proxy_config']['type'] = request.form.get('proxy_type', 'none')
+        
+        # Configuración específica del tipo de proxy
+        if CONFIG['proxy_config']['type'] == 'list':
+            proxy_list_text = request.form.get('proxy_list_text', '')
+            CONFIG['proxy_config']['list'] = [line.strip() for line in proxy_list_text.split('\n') if line.strip()]
+        elif CONFIG['proxy_config']['type'] == 'service':
+            CONFIG['proxy_config']['service_name'] = request.form.get('service_name', '')
+            CONFIG['proxy_config']['api_key'] = request.form.get('api_key', '')
+            CONFIG['proxy_config']['username'] = request.form.get('username', '')
+        
+        # Guardar configuración en archivo
+        try:
+            with open('config.json', 'w', encoding='utf-8') as f:
+                json.dump(CONFIG, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"No se pudo guardar la configuración en disco: {str(e)}")
+        
+        # Re-inicializar componentes
+        init_components()
+        
+        logger.info("Configuración avanzada actualizada correctamente")
+        return render_template('advanced_config.html', 
+                              config=CONFIG, 
+                              message="Configuración guardada correctamente", 
+                              message_type="success")
+    except Exception as e:
+        logger.error(f"Error al guardar configuración avanzada: {str(e)}")
+        return render_template('advanced_config.html', 
+                              config=CONFIG, 
+                              message=f"Error al guardar configuración: {str(e)}", 
+                              message_type="danger")
+
+@app.route('/schedule_task', methods=['POST'])
+def schedule_task():
+    """Programa una tarea para ejecución posterior"""
+    try:
+        # Comprobar si el programador está habilitado
+        if not CONFIG['scheduler_enabled']:
+            return jsonify({
+                "success": False, 
+                "error": "El programador de tareas no está habilitado. Actívalo en la configuración avanzada."
+            }), 400
+            
+        # Inicializar componentes si es necesario
+        if task_scheduler is None:
+            init_components()
+            
+        # Si aún así el programador no está disponible, error
+        if task_scheduler is None:
+            return jsonify({
+                "success": False, 
+                "error": "No se pudo inicializar el programador de tareas."
+            }), 500
+        
+        # Obtener datos del formulario
+        task_type = request.form.get('task_type')  # 'product_search' o 'seller_search'
+        
+        # Común para ambos tipos
+        schedule_time_str = request.form.get('schedule_time')
+        recurrence = request.form.get('recurrence', None)  # None, 'daily', 'weekly', 'monthly'
+        
+        # Convertir fecha y hora
+        schedule_time = None
+        if schedule_time_str:
+            try:
+                schedule_time = datetime.fromisoformat(schedule_time_str)
+            except ValueError:
+                return jsonify({
+                    "success": False, 
+                    "error": "Formato de fecha y hora inválido."
+                }), 400
+        
+        # Parámetros específicos según el tipo de tarea
+        params = {}
+        
+        if task_type == 'product_search':
+            params['search_query'] = request.form.get('search_query', '')
+            params['exact_match'] = request.form.get('exact_match') == 'on'
+            params['seller_filter'] = request.form.get('seller_filter', '')
+        elif task_type == 'seller_search':
+            params['seller_name'] = request.form.get('seller_name', '')
+        else:
+            return jsonify({
+                "success": False, 
+                "error": "Tipo de tarea no válido."
+            }), 400
+            
+        # Parámetros comunes
+        params['min_price'] = int(request.form.get('min_price', '0'))
+        params['min_sales'] = int(request.form.get('min_sales', '0'))
+        params['deep_sales_search'] = request.form.get('deep_sales_search') == 'on'
+        params['max_products'] = int(request.form.get('max_products', CONFIG['max_products']))
+        params['max_pages'] = int(request.form.get('max_pages', CONFIG['max_pages']))
+        
+        # Crear la tarea
+        task_id = task_scheduler.add_task(
+            task_type=task_type,
+            params=params,
+            schedule_time=schedule_time,
+            recurrence=recurrence
+        )
+        
+        return jsonify({
+            "success": True,
+            "message": "Tarea programada correctamente",
+            "task_id": task_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error al programar tarea: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Error al programar tarea: {str(e)}"
+        }), 500
+
+@app.route('/scheduled_tasks')
+def scheduled_tasks():
+    """Muestra las tareas programadas"""
+    try:
+        # Inicializar componentes si es necesario
+        if task_scheduler is None:
+            init_components()
+            
+        # Si el programador no está disponible, error
+        if task_scheduler is None:
+            return render_template('scheduled_tasks.html', 
+                                  error="El programador de tareas no está habilitado.",
+                                  tasks=[])
+        
+        # Obtener tareas
+        tasks = task_scheduler.get_all_tasks()
+        
+        return render_template('scheduled_tasks.html', tasks=tasks)
+    except Exception as e:
+        logger.error(f"Error al obtener tareas programadas: {str(e)}")
+        return render_template('scheduled_tasks.html', 
+                              error=f"Error al obtener tareas programadas: {str(e)}",
+                              tasks=[])
+
+@app.route('/delete_task/<task_id>', methods=['POST'])
+def delete_task(task_id):
+    """Elimina una tarea programada"""
+    try:
+        # Comprobar si el programador está habilitado
+        if not CONFIG['scheduler_enabled'] or task_scheduler is None:
+            return jsonify({
+                "success": False, 
+                "error": "El programador de tareas no está habilitado."
+            }), 400
+            
+        # Eliminar tarea
+        task_scheduler.delete_task(task_id)
+        
+        return jsonify({
+            "success": True,
+            "message": "Tarea eliminada correctamente"
+        })
+    except Exception as e:
+        logger.error(f"Error al eliminar tarea: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": f"Error al eliminar tarea: {str(e)}"
+        }), 500
+
+# Inicializar componentes al inicio
+init_components()
+
 if __name__ == '__main__':
+    # Cargar configuración desde archivo si existe
+    try:
+        if os.path.exists('config.json'):
+            with open('config.json', 'r', encoding='utf-8') as f:
+                saved_config = json.load(f)
+                # Actualizar solo las claves que existen en ambos
+                for key in CONFIG:
+                    if key in saved_config:
+                        CONFIG[key] = saved_config[key]
+            logger.info("Configuración cargada desde archivo")
+    except Exception as e:
+        logger.warning(f"No se pudo cargar la configuración desde archivo: {str(e)}")
+    
+    # Inicializar componentes después de cargar la configuración
+    init_components()
+    
+    # Abrir navegador y ejecutar la aplicación
     Timer(1, open_browser).start()
     app.run(debug=True)
